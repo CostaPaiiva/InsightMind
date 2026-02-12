@@ -49,7 +49,7 @@ def _answer_with_ollama(question: str, context: dict) -> str:
     # requer: pip install ollama + ollama instalado/rodando
     import ollama
 
-    model = st.secrets.get("OLLAMA_MODEL", "llama3.1")
+    model = st.secrets.get("OLLAMA_MODEL", model = "llama3.2:1b")
 
     system = (
         "Você é um analista de dados sênior. Responda em PT-BR, com objetividade. "

@@ -148,6 +148,8 @@ with tabs[1]:
 
 # --- Chat IA
 
+# --- Chat IA
+# --- Chat IA
 with tabs[2]:
     st.markdown("### 💬 Pergunte ao seu dataset")
     st.caption("Ex.: “O que esse dataset diz?”, “Quais problemas de qualidade existem?”, “O que devo melhorar?”")
@@ -155,53 +157,72 @@ with tabs[2]:
     provider_effective = llm_provider if use_llm else "offline"
     default_q = "O que esse dataset diz? Traga visão geral, achados importantes, problemas de qualidade e recomendações práticas."
 
-    # Render estável do histórico (sempre no mesmo lugar)
-    st.markdown("### Histórico (últimas 10)")
-    history_box = st.container()
+    # ✅ Caixa de pergunta EM CIMA + Enter envia (form submit)
+    with st.form("chat_form", clear_on_submit=True):
+        q = st.text_input("Digite sua pergunta e pressione Enter…", value="")
+        colb1, colb2 = st.columns([1, 1])
+        send = colb1.form_submit_button("Enviar")
+        ask_default = colb2.form_submit_button("✨ O que esse dataset diz?")
 
-    with history_box:
-        last_10 = st.session_state["chat_history"][-10:]
-        for item in last_10:
-            with st.chat_message("user"):
-                st.markdown(item["q"])
-            with st.chat_message("assistant"):
-                # st.write costuma ser ainda mais “safe” que markdown pra textos longos
-                st.write(item["a"])
-            st.divider()
+    # Processa envio
+    if send or ask_default:
+        q_final = default_q if ask_default else (q or "").strip()
 
-    st.caption(f"Provedor em uso: **{provider_effective}**")
-    st.markdown("---")
-
-    # Input e botões
-    user_q = st.text_input("Sua pergunta", value="", key="chat_input_question")
-
-    col_btn1, col_btn2 = st.columns([1, 1])
-    ask_custom = col_btn1.button("(perguntar)", key="btn_ask_custom")
-    ask_default = col_btn2.button("✨ O que esse dataset diz?", key="btn_ask_default")
-
-    if ask_custom or ask_default:
-        q = user_q.strip() if ask_custom else default_q
-
-        if ask_custom and not q:
-            st.warning("Digite uma pergunta ou use o botão padrão.")
+        if not q_final:
+            st.warning("Digite uma pergunta.")
         else:
-            with st.spinner("Gerando resposta..."):
-                answer = dataset_chat_answer(
-                    question=q,
-                    df=df,
-                    quality_metrics=make_quality_metrics(df),
-                    auto_insights=generate_auto_insights(df, use_llm=False),
-                    summary_table=basic_summary(df).head(30),
-                    provider=provider_effective,
-                )
+            # Cacheia para não recalcular a cada pergunta (melhora muito performance/estabilidade)
+            if "qm_cached" not in st.session_state:
+                st.session_state["qm_cached"] = make_quality_metrics(df)
 
-            st.session_state["chat_history"].append({
-                "id": str(uuid.uuid4()),
-                "q": q,
-                "a": answer
-            })
+            if "summary_cached" not in st.session_state:
+                st.session_state["summary_cached"] = basic_summary(df).head(30)
 
-            st.rerun()
+            if "insights_cached" not in st.session_state:
+                st.session_state["insights_cached"] = generate_auto_insights(df, use_llm=False)
+
+            try:
+                with st.spinner("Gerando resposta..."):
+                    answer = dataset_chat_answer(
+                        question=q_final,
+                        df=df,
+                        quality_metrics=st.session_state["qm_cached"],
+                        auto_insights=st.session_state["insights_cached"],
+                        summary_table=st.session_state["summary_cached"],
+                        provider=provider_effective,
+                    )
+
+                st.session_state["chat_history"].append({
+                    "id": str(uuid.uuid4()),
+                    "q": q_final,
+                    "a": answer
+                })
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Erro ao gerar resposta: {e}")
+                # opcional: guardar no histórico como erro, para você ver depois
+                st.session_state["chat_history"].append({
+                    "id": str(uuid.uuid4()),
+                    "q": q_final,
+                    "a": f"⚠️ Erro ao gerar resposta: {e}"
+                })
+                st.rerun()
+
+        st.caption(f"Provedor em uso: **{provider_effective}**")
+        st.markdown("---")
+
+        # ✅ Respostas sempre embaixo
+        st.markdown("### Histórico (últimas 10)")
+        history_box = st.container()
+        with history_box:
+            last_10 = st.session_state["chat_history"][-10:]
+            for item in last_10:
+                with st.chat_message("user"):
+                    st.markdown(item["q"])
+                with st.chat_message("assistant"):
+                    st.write(item["a"])
+                st.divider()
 
 
 
