@@ -147,6 +147,7 @@ with tabs[1]:
     render_visuals(df)
 
 # --- Chat IA
+# --- Chat IA
 with tabs[2]:
     st.markdown("### 💬 Pergunte ao seu dataset")
     st.caption("Ex.: “O que esse dataset diz?”, “Quais problemas de qualidade existem?”, “O que devo melhorar?”")
@@ -155,18 +156,34 @@ with tabs[2]:
 
     default_q = "O que esse dataset diz? Traga visão geral, achados importantes, problemas de qualidade e recomendações práticas."
 
-    # Input com key fixo (evita bug DOM)
+    # 1) Render estável primeiro (sempre no mesmo lugar)
+    st.markdown("### Histórico (últimas 10)")
+    history_box = st.container()
+
+    with history_box:
+        last_10 = st.session_state["chat_history"][-10:]
+        for item in last_10:
+            # Conteúdo com keys estáveis (importante!)
+            with st.chat_message("user"):
+                st.markdown(item["q"], key=f"q_{item['id']}")
+            with st.chat_message("assistant"):
+                st.markdown(item["a"], key=f"a_{item['id']}")
+            st.divider()
+
+    st.caption(f"Provedor em uso: **{provider_effective}**")
+    st.markdown("---")
+
+    # 2) Input e botões depois (não misturar com render de resposta)
     user_q = st.text_input("Sua pergunta", value="", key="chat_input_question")
 
     col_btn1, col_btn2 = st.columns([1, 1])
     ask_custom = col_btn1.button("(perguntar)", key="btn_ask_custom")
     ask_default = col_btn2.button("✨ O que esse dataset diz?", key="btn_ask_default")
 
-    # Container fixo pra resposta (evita rerender caótico)
-    answer_box = st.container()
-
+    # 3) Se perguntou: calcula, salva e rerun (NÃO renderiza resposta aqui)
     if ask_custom or ask_default:
         q = user_q.strip() if ask_custom else default_q
+
         if ask_custom and not q:
             st.warning("Digite uma pergunta ou use o botão padrão.")
         else:
@@ -180,35 +197,19 @@ with tabs[2]:
                     provider=provider_effective,
                 )
 
-            # salva histórico ANTES de renderizar (agora com id estável)
+            # id estável por item
             st.session_state["chat_history"].append({
                 "id": str(uuid.uuid4()),
                 "q": q,
                 "a": answer
             })
 
-            # renderiza a resposta mais recente dentro de container estável
-            with answer_box:
-                st.markdown("#### Resposta (mais recente)")
-                st.write(answer)
+            # limpa o input (opcional, mas ajuda estabilidade visual)
+            st.session_state["chat_input_question"] = ""
 
-    st.caption(f"Provedor em uso: **{provider_effective}**")
+            # importante: re-render limpo pelo histórico
+            st.rerun()
 
-    st.markdown("---")
-    st.markdown("### Histórico (últimas 10)")
-
-    # Render estável do histórico:
-    # - um único container
-    # - mensagens via st.chat_message (árvore mais previsível)
-    history_box = st.container()
-    with history_box:
-        last_10 = st.session_state["chat_history"][-10:]
-        for item in last_10:
-            with st.chat_message("user"):
-                st.markdown(item["q"])
-            with st.chat_message("assistant"):
-                st.write(item["a"])
-            st.markdown("---")
 
 # --- Limpeza
 with tabs[3]:
