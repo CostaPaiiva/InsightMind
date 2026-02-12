@@ -147,40 +147,38 @@ with tabs[1]:
     render_visuals(df)
 
 # --- Chat IA
-# --- Chat IA
+
 with tabs[2]:
     st.markdown("### 💬 Pergunte ao seu dataset")
     st.caption("Ex.: “O que esse dataset diz?”, “Quais problemas de qualidade existem?”, “O que devo melhorar?”")
 
     provider_effective = llm_provider if use_llm else "offline"
-
     default_q = "O que esse dataset diz? Traga visão geral, achados importantes, problemas de qualidade e recomendações práticas."
 
-    # 1) Render estável primeiro (sempre no mesmo lugar)
+    # Render estável do histórico (sempre no mesmo lugar)
     st.markdown("### Histórico (últimas 10)")
     history_box = st.container()
 
     with history_box:
         last_10 = st.session_state["chat_history"][-10:]
         for item in last_10:
-            # Conteúdo com keys estáveis (importante!)
             with st.chat_message("user"):
-                st.markdown(item["q"], key=f"q_{item['id']}")
+                st.markdown(item["q"])
             with st.chat_message("assistant"):
-                st.markdown(item["a"], key=f"a_{item['id']}")
+                # st.write costuma ser ainda mais “safe” que markdown pra textos longos
+                st.write(item["a"])
             st.divider()
 
     st.caption(f"Provedor em uso: **{provider_effective}**")
     st.markdown("---")
 
-    # 2) Input e botões depois (não misturar com render de resposta)
+    # Input e botões
     user_q = st.text_input("Sua pergunta", value="", key="chat_input_question")
 
     col_btn1, col_btn2 = st.columns([1, 1])
     ask_custom = col_btn1.button("(perguntar)", key="btn_ask_custom")
     ask_default = col_btn2.button("✨ O que esse dataset diz?", key="btn_ask_default")
 
-    # 3) Se perguntou: calcula, salva e rerun (NÃO renderiza resposta aqui)
     if ask_custom or ask_default:
         q = user_q.strip() if ask_custom else default_q
 
@@ -197,18 +195,14 @@ with tabs[2]:
                     provider=provider_effective,
                 )
 
-            # id estável por item
             st.session_state["chat_history"].append({
                 "id": str(uuid.uuid4()),
                 "q": q,
                 "a": answer
             })
 
-            # limpa o input (opcional, mas ajuda estabilidade visual)
-            st.session_state["chat_input_question"] = ""
-
-            # importante: re-render limpo pelo histórico
             st.rerun()
+
 
 
 # --- Limpeza
