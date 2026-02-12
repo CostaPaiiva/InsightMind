@@ -15,6 +15,13 @@ st.title("🧠 InsightMind — AutoDashboard + Chat IA + Limpeza + Relatório")
 with st.sidebar:
     st.header("⚙️ Configurações")
     use_llm = st.toggle("Ativar Chat IA (LLM)", value=True)
+    
+    llm_provider = st.selectbox(
+        "Provedor do Chat IA",
+        ["auto", "openai", "ollama", "offline"],
+        index=0,
+        help="auto: tenta OpenAI → Ollama → offline"
+    )
     max_rows_preview = st.slider("Linhas no preview", 10, 200, 50)
     st.markdown("---")
     file = st.file_uploader("📁 Envie um CSV", type=["csv"])

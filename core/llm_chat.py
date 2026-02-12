@@ -1,28 +1,19 @@
 import streamlit as st
 import pandas as pd
+
 from openai import OpenAI
 from openai import RateLimitError, AuthenticationError, APIConnectionError, BadRequestError, APIStatusError
 
-def _client() -> OpenAI:
+from core.fallback_chat import offline_answer
+
+def _openai_client() -> OpenAI:
     api_key = st.secrets.get("OPENAI_API_KEY", None)
     if not api_key:
-        raise RuntimeError("OPENAI_API_KEY não encontrada em .streamlit/secrets.toml")
+        raise RuntimeError("OPENAI_API_KEY ausente")
     return OpenAI(api_key=api_key)
 
-def dataset_chat_answer(
-    question: str,
-    df: pd.DataFrame,
-    quality_metrics: dict,
-    auto_insights: list[str],
-    summary_table: pd.DataFrame,
-) -> str:
-    """
-    Retorna resposta do LLM. Se houver erro de cota/billing (429 insufficient_quota),
-    retorna uma mensagem amigável e recomendações.
-    """
-    model = st.secrets.get("OPENAI_MODEL", "gpt-4.1-mini")
-
-    context = {
+def _build_context(df: pd.DataFrame, quality_metrics: dict, auto_insights: list[str], summary_table: pd.DataFrame) -> dict:
+    return {
         "shape": {"rows": int(df.shape[0]), "cols": int(df.shape[1])},
         "columns": list(df.columns)[:200],
         "quality_metrics": quality_metrics,
@@ -31,6 +22,12 @@ def dataset_chat_answer(
         "sample_rows": df.head(15).to_dict(orient="records"),
     }
 
+def _prompt(system: str, question: str, context: dict) -> str:
+    return f"{system}\n\nPergunta do usuário: {question}\n\nContexto do dataset (JSON):\n{context}"
+
+def _answer_with_openai(question: str, context: dict) -> str:
+    model = st.secrets.get("OPENAI_MODEL", "gpt-4.1-mini")
+
     system = (
         "Você é um analista de dados sênior. Responda em PT-BR, com objetividade. "
         "Baseie-se SOMENTE no contexto fornecido (não invente colunas/valores). "
@@ -38,39 +35,77 @@ def dataset_chat_answer(
         "Se algo não estiver no contexto, diga que não dá para afirmar."
     )
 
-    user = f"Pergunta do usuário: {question}\n\nContexto do dataset (JSON):\n{context}"
+    client = _openai_client()
+    resp = client.responses.create(
+        model=model,
+        input=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": f"Pergunta: {question}\n\nContexto:\n{context}"},
+        ],
+    )
+    return resp.output_text
 
-    try:
-        client = _client()
-        resp = client.responses.create(
-            model=model,
-            input=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        )
-        return resp.output_text
+def _answer_with_ollama(question: str, context: dict) -> str:
+    # requer: pip install ollama + ollama instalado/rodando
+    import ollama
 
-    except RateLimitError as e:
-        # 429 pode ser quota estourada OU insufficient_quota (sem créditos)
-        return (
-            "⚠️ **Chat IA indisponível agora (OpenAI 429 / sem cota ou créditos).**\n\n"
-            "O InsightMind vai continuar funcionando com **insights automáticos sem LLM**.\n\n"
-            "**Como resolver:**\n"
-            "1) Verifique se sua API Key é do projeto correto.\n"
-            "2) Ative faturamento/créditos no painel da OpenAI (billing).\n"
-            "3) Se você preferir custo zero, use um LLM local (ex.: Ollama) como fallback.\n"
-        )
+    model = st.secrets.get("OLLAMA_MODEL", "llama3.1")
 
-    except AuthenticationError:
-        return (
-            "❌ **Falha de autenticação (API Key inválida ou ausente).**\n"
-            "Confira `OPENAI_API_KEY` em `.streamlit/secrets.toml`."
-        )
+    system = (
+        "Você é um analista de dados sênior. Responda em PT-BR, com objetividade. "
+        "Baseie-se SOMENTE no contexto fornecido (não invente colunas/valores). "
+        "Traga: (1) visão geral, (2) achados, (3) problemas de qualidade, (4) recomendações práticas. "
+        "Se algo não estiver no contexto, diga que não dá para afirmar."
+    )
 
-    except (APIConnectionError, APIStatusError, BadRequestError) as e:
-        return (
-            "⚠️ **Erro ao chamar o serviço de IA.**\n\n"
-            f"Detalhes: {type(e).__name__}\n"
-            "Tente novamente mais tarde ou desative o Chat IA nas configurações."
-        )
+    prompt = f"{system}\n\nPergunta: {question}\n\nContexto do dataset (JSON):\n{context}"
+
+    r = ollama.chat(
+        model=model,
+        messages=[
+            {"role": "user", "content": prompt}
+        ],
+    )
+    return r["message"]["content"]
+
+def dataset_chat_answer(
+    question: str,
+    df: pd.DataFrame,
+    quality_metrics: dict,
+    auto_insights: list[str],
+    summary_table: pd.DataFrame,
+    provider: str = "auto",  # "auto" | "openai" | "ollama" | "offline"
+) -> str:
+    """
+    provider:
+      - auto: tenta OpenAI; se falhar, tenta Ollama; se falhar, offline
+      - openai: só OpenAI
+      - ollama: só Ollama
+      - offline: heurístico
+    """
+    context = _build_context(df, quality_metrics, auto_insights, summary_table)
+
+    if provider == "offline":
+        return offline_answer(question, df)
+
+    if provider in ("auto", "openai"):
+        try:
+            return _answer_with_openai(question, context)
+        except RateLimitError:
+            if provider == "openai":
+                return "⚠️ OpenAI: sem cota/créditos (429). Troque o provedor para Ollama ou Offline."
+        except AuthenticationError:
+            if provider == "openai":
+                return "❌ OpenAI: API Key inválida/ausente. Configure OPENAI_API_KEY ou use Ollama/Offline."
+        except (APIConnectionError, APIStatusError, BadRequestError, Exception):
+            if provider == "openai":
+                return "⚠️ OpenAI: erro na chamada. Troque para Ollama/Offline."
+
+    if provider in ("auto", "ollama"):
+        try:
+            return _answer_with_ollama(question, context)
+        except Exception:
+            if provider == "ollama":
+                return "⚠️ Ollama indisponível. Verifique se o Ollama está instalado/rodando e se o modelo foi baixado."
+
+    return offline_answer(question, df)

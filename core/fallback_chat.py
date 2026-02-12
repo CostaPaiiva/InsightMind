@@ -1,20 +1,27 @@
 import pandas as pd
 from core.insights import generate_auto_insights
-from core.suggestions import generate_suggestions
-from core.profiler import make_quality_metrics
+from core.profiler import make_quality_metrics, basic_summary
 
-def fallback_answer(df: pd.DataFrame) -> str:
+def offline_answer(question: str, df: pd.DataFrame) -> str:
     qm = make_quality_metrics(df)
     ins = generate_auto_insights(df, use_llm=False)
-    sug = generate_suggestions(df)
+    summ = basic_summary(df).head(25)
 
-    text = []
-    text.append(f"Visão geral: {qm['linhas']} linhas e {qm['colunas']} colunas.")
-    text.append(f"Missing total: {qm['missing_total']} ({qm['missing_%']:.1f}%). Duplicadas: {qm['linhas_duplicadas']}.")
-    text.append("\nPrincipais insights:")
-    for i in ins[:8]:
-        text.append(f"- {i}")
-    text.append("\nSugestões de melhoria:")
-    for s in sug[:8]:
-        text.append(f"- {s}")
-    return "\n".join(text)
+    lines = []
+    lines.append("🟡 **Modo offline (sem LLM disponível)**")
+    lines.append("")
+    lines.append(f"**Pergunta:** {question}")
+    lines.append("")
+    lines.append(f"**Visão geral:** {qm['linhas']} linhas, {qm['colunas']} colunas.")
+    lines.append(f"**Qualidade:** missing_total={qm['missing_total']} ({qm['missing_%']:.1f}%), duplicadas={qm['linhas_duplicadas']}.")
+    lines.append("")
+    lines.append("**Principais insights automáticos:**")
+    for x in ins[:8]:
+        lines.append(f"- {x}")
+    lines.append("")
+    lines.append("**Resumo (amostra das colunas):**")
+    for _, row in summ.iterrows():
+        lines.append(f"- {row['coluna']} | {row['tipo']} | missing {row['% missing']:.1f}% | únicos {row['n_unique']} | ex: {row['exemplo']}")
+    lines.append("")
+    lines.append("💡 Para respostas em linguagem natural: ative OpenAI (billing) ou use Ollama local.")
+    return "\n".join(lines)
