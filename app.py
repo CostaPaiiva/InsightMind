@@ -66,37 +66,42 @@ with tabs[2]:
     st.markdown("### 💬 Pergunte ao seu dataset")
     st.caption("Ex.: “O que esse dataset diz?”, “Quais problemas de qualidade existem?”, “O que devo melhorar?”")
 
-    if not use_llm:
-        st.warning("Ative o Chat IA no menu lateral para usar o LLM.")
-    else:
-        default_q = "O que esse dataset diz? Traga visão geral, achados importantes, problemas de qualidade e recomendações práticas."
-        user_q = st.text_input("Sua pergunta", value="")
+    # Se o usuário desligar o Chat IA, ainda responde em modo offline
+    provider_effective = llm_provider if use_llm else "offline"
 
-        col_btn1, col_btn2 = st.columns([1, 1])
-        ask_custom = col_btn1.button("(Perguntar)")
-        ask_default = col_btn2.button("✨ O que esse dataset diz?")
+    default_q = "O que esse dataset diz? Traga visão geral, achados importantes, problemas de qualidade e recomendações práticas."
+    user_q = st.text_input("Sua pergunta", value="")
 
-        if ask_custom or ask_default:
-            q = user_q.strip() if ask_custom else default_q
-            if ask_custom and not q:
-                st.warning("Digite uma pergunta ou use o botão padrão.")
-            else:
-                with st.spinner("Gerando resposta..."):
-                    answer = dataset_chat_answer(
-                        question=q,
-                        df=df,
-                        quality_metrics=make_quality_metrics(df),
-                        auto_insights=generate_auto_insights(df, use_llm=False),
-                        summary_table=basic_summary(df).head(30),
-                    )
-                st.session_state["chat_history"].append({"q": q, "a": answer})
+    col_btn1, col_btn2 = st.columns([1, 1])
+    ask_custom = col_btn1.button("Perguntar (minha pergunta)")
+    ask_default = col_btn2.button("✨ O que esse dataset diz?")
 
+    if ask_custom or ask_default:
+        q = user_q.strip() if ask_custom else default_q
+        if ask_custom and not q:
+            st.warning("Digite uma pergunta ou use o botão padrão.")
+        else:
+            with st.spinner("Gerando resposta..."):
+                answer = dataset_chat_answer(
+                    question=q,
+                    df=df,
+                    quality_metrics=make_quality_metrics(df),
+                    auto_insights=generate_auto_insights(df, use_llm=False),
+                    summary_table=basic_summary(df).head(30),
+                    provider=provider_effective,   # ✅ AQUI é o principal
+                )
+            st.session_state["chat_history"].append({"q": q, "a": answer})
+
+    # Mostra qual provedor está em uso (opcional, mas ajuda debug)
+    st.caption(f"Provedor em uso: **{provider_effective}**")
+
+    st.markdown("---")
+    st.markdown("### Histórico")
+    for i, item in enumerate(reversed(st.session_state["chat_history"]), 1):
+        st.markdown(f"**Q{i}:** {item['q']}")
+        st.write(item["a"])
         st.markdown("---")
-        st.markdown("### Histórico")
-        for i, item in enumerate(reversed(st.session_state["chat_history"]), 1):
-            st.markdown(f"**Q{i}:** {item['q']}")
-            st.write(item["a"])
-            st.markdown("---")
+
 
 # --- Limpeza
 with tabs[3]:
