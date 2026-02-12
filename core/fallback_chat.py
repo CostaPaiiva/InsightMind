@@ -23,5 +23,5 @@ def offline_answer(question: str, df: pd.DataFrame) -> str:
     for _, row in summ.iterrows():
         lines.append(f"- {row['coluna']} | {row['tipo']} | missing {row['% missing']:.1f}% | únicos {row['n_unique']} | ex: {row['exemplo']}")
     lines.append("")
-    lines.append("💡 Para respostas em linguagem natural: ative OpenAI (billing) ou use Ollama local.")
+    lines.append("")
     return "\n".join(lines)

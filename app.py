@@ -73,7 +73,7 @@ with tabs[2]:
         user_q = st.text_input("Sua pergunta", value="")
 
         col_btn1, col_btn2 = st.columns([1, 1])
-        ask_custom = col_btn1.button("Perguntar (minha pergunta)")
+        ask_custom = col_btn1.button("(Perguntar)")
         ask_default = col_btn2.button("✨ O que esse dataset diz?")
 
         if ask_custom or ask_default:
