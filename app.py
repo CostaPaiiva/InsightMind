@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import uuid
 
 from core.loader import load_csv_smart
 from core.profiler import make_quality_metrics, basic_summary
@@ -12,10 +13,93 @@ from core.report import build_html_report, build_pdf_report
 st.set_page_config(page_title="InsightMind", layout="wide")
 st.title("🧠 InsightMind — AutoDashboard + Chat IA + Limpeza + Relatório")
 
+# ----------------------------
+# Chat UI (estrutura estável)
+# ----------------------------
+def _init_state():
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = []
+
+def _add(role: str, content: str):
+    st.session_state.chat_messages.append({
+        "id": str(uuid.uuid4()),
+        "role": role,
+        "content": content
+    })
+
+def render_chat():
+    chat_area = st.container()
+    with chat_area:
+        for m in st.session_state.chat_messages:
+            with st.chat_message(m["role"]):
+                # Evita chaves dinâmicas/instáveis: sem placeholders dentro do loop
+                st.markdown(m["content"])
+
+def chat_ui(llm_respond_fn):
+    _init_state()
+
+    render_chat()
+
+    prompt = st.chat_input("Digite sua mensagem…")
+    if prompt:
+        _add("user", prompt)
+
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Pensando..."):
+                answer = llm_respond_fn(prompt, st.session_state.chat_messages)
+                st.markdown(answer)
+
+        _add("assistant", answer)
+        st.rerun()
+
+# ----------------------------
+# Wrappers opcionais (não quebrar)
+# ----------------------------
+def respond_with_ollama(user_prompt: str, history: list[dict]) -> str:
+    df = st.session_state.get("df_clean", st.session_state.get("df_raw"))
+    if df is None:
+        return "Envie um CSV para começarmos."
+
+    return dataset_chat_answer(
+        question=user_prompt,
+        df=df,
+        quality_metrics=make_quality_metrics(df),
+        auto_insights=generate_auto_insights(df, use_llm=False),
+        summary_table=basic_summary(df).head(30),
+        provider="ollama",
+    )
+
+def respond_with_fallback(user_prompt: str, history: list[dict]) -> str:
+    df = st.session_state.get("df_clean", st.session_state.get("df_raw"))
+    if df is None:
+        return "Envie um CSV para começarmos."
+
+    # fallback seguro (offline)
+    return dataset_chat_answer(
+        question=user_prompt,
+        df=df,
+        quality_metrics=make_quality_metrics(df),
+        auto_insights=generate_auto_insights(df, use_llm=False),
+        summary_table=basic_summary(df).head(30),
+        provider="offline",
+    )
+
+def llm_respond_fn(user_prompt: str, history: list[dict]) -> str:
+    try:
+        return respond_with_ollama(user_prompt, history)
+    except Exception:
+        return respond_with_fallback(user_prompt, history)
+
+# ----------------------------
+# Sidebar
+# ----------------------------
 with st.sidebar:
     st.header("⚙️ Configurações")
     use_llm = st.toggle("Ativar Chat IA (LLM)", value=True)
-    
+
     llm_provider = st.selectbox(
         "Provedor do Chat IA",
         ["auto", "openai", "ollama", "offline"],
@@ -33,6 +117,7 @@ if not file:
 df, meta = load_csv_smart(file)
 st.session_state["df_raw"] = df.copy()
 
+# Histórico do chat do tab (mantido)
 if "chat_history" not in st.session_state:
     st.session_state["chat_history"] = []
 
@@ -66,15 +151,19 @@ with tabs[2]:
     st.markdown("### 💬 Pergunte ao seu dataset")
     st.caption("Ex.: “O que esse dataset diz?”, “Quais problemas de qualidade existem?”, “O que devo melhorar?”")
 
-    # Se o usuário desligar o Chat IA, ainda responde em modo offline
     provider_effective = llm_provider if use_llm else "offline"
 
     default_q = "O que esse dataset diz? Traga visão geral, achados importantes, problemas de qualidade e recomendações práticas."
-    user_q = st.text_input("Sua pergunta", value="")
+
+    # Input com key fixo (evita bug DOM)
+    user_q = st.text_input("Sua pergunta", value="", key="chat_input_question")
 
     col_btn1, col_btn2 = st.columns([1, 1])
-    ask_custom = col_btn1.button("(Perguntar)")
-    ask_default = col_btn2.button("✨ O que esse dataset diz?")
+    ask_custom = col_btn1.button("(perguntar)", key="btn_ask_custom")
+    ask_default = col_btn2.button("✨ O que esse dataset diz?", key="btn_ask_default")
+
+    # Container fixo pra resposta (evita rerender caótico)
+    answer_box = st.container()
 
     if ask_custom or ask_default:
         q = user_q.strip() if ask_custom else default_q
@@ -88,20 +177,38 @@ with tabs[2]:
                     quality_metrics=make_quality_metrics(df),
                     auto_insights=generate_auto_insights(df, use_llm=False),
                     summary_table=basic_summary(df).head(30),
-                    provider=provider_effective,   # ✅ AQUI é o principal
+                    provider=provider_effective,
                 )
-            st.session_state["chat_history"].append({"q": q, "a": answer})
 
-    # Mostra qual provedor está em uso (opcional, mas ajuda debug)
+            # salva histórico ANTES de renderizar (agora com id estável)
+            st.session_state["chat_history"].append({
+                "id": str(uuid.uuid4()),
+                "q": q,
+                "a": answer
+            })
+
+            # renderiza a resposta mais recente dentro de container estável
+            with answer_box:
+                st.markdown("#### Resposta (mais recente)")
+                st.write(answer)
+
     st.caption(f"Provedor em uso: **{provider_effective}**")
 
     st.markdown("---")
-    st.markdown("### Histórico")
-    for i, item in enumerate(reversed(st.session_state["chat_history"]), 1):
-        st.markdown(f"**Q{i}:** {item['q']}")
-        st.write(item["a"])
-        st.markdown("---")
+    st.markdown("### Histórico (últimas 10)")
 
+    # Render estável do histórico:
+    # - um único container
+    # - mensagens via st.chat_message (árvore mais previsível)
+    history_box = st.container()
+    with history_box:
+        last_10 = st.session_state["chat_history"][-10:]
+        for item in last_10:
+            with st.chat_message("user"):
+                st.markdown(item["q"])
+            with st.chat_message("assistant"):
+                st.write(item["a"])
+            st.markdown("---")
 
 # --- Limpeza
 with tabs[3]:
