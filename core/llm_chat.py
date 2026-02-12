@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from openai import OpenAI
+from openai import RateLimitError, AuthenticationError, APIConnectionError, BadRequestError, APIStatusError
 
 def _client() -> OpenAI:
     api_key = st.secrets.get("OPENAI_API_KEY", None)
@@ -8,7 +9,17 @@ def _client() -> OpenAI:
         raise RuntimeError("OPENAI_API_KEY não encontrada em .streamlit/secrets.toml")
     return OpenAI(api_key=api_key)
 
-def dataset_chat_answer(question: str, df: pd.DataFrame, quality_metrics: dict, auto_insights: list[str], summary_table: pd.DataFrame) -> str:
+def dataset_chat_answer(
+    question: str,
+    df: pd.DataFrame,
+    quality_metrics: dict,
+    auto_insights: list[str],
+    summary_table: pd.DataFrame,
+) -> str:
+    """
+    Retorna resposta do LLM. Se houver erro de cota/billing (429 insufficient_quota),
+    retorna uma mensagem amigável e recomendações.
+    """
     model = st.secrets.get("OPENAI_MODEL", "gpt-4.1-mini")
 
     context = {
@@ -28,13 +39,38 @@ def dataset_chat_answer(question: str, df: pd.DataFrame, quality_metrics: dict, 
     )
 
     user = f"Pergunta do usuário: {question}\n\nContexto do dataset (JSON):\n{context}"
-    client = _client()
 
-    resp = client.responses.create(
-        model=model,
-        input=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-    )
-    return resp.output_text
+    try:
+        client = _client()
+        resp = client.responses.create(
+            model=model,
+            input=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+        return resp.output_text
+
+    except RateLimitError as e:
+        # 429 pode ser quota estourada OU insufficient_quota (sem créditos)
+        return (
+            "⚠️ **Chat IA indisponível agora (OpenAI 429 / sem cota ou créditos).**\n\n"
+            "O InsightMind vai continuar funcionando com **insights automáticos sem LLM**.\n\n"
+            "**Como resolver:**\n"
+            "1) Verifique se sua API Key é do projeto correto.\n"
+            "2) Ative faturamento/créditos no painel da OpenAI (billing).\n"
+            "3) Se você preferir custo zero, use um LLM local (ex.: Ollama) como fallback.\n"
+        )
+
+    except AuthenticationError:
+        return (
+            "❌ **Falha de autenticação (API Key inválida ou ausente).**\n"
+            "Confira `OPENAI_API_KEY` em `.streamlit/secrets.toml`."
+        )
+
+    except (APIConnectionError, APIStatusError, BadRequestError) as e:
+        return (
+            "⚠️ **Erro ao chamar o serviço de IA.**\n\n"
+            f"Detalhes: {type(e).__name__}\n"
+            "Tente novamente mais tarde ou desative o Chat IA nas configurações."
+        )
