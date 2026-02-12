@@ -1,0 +1,1 @@
+# InsightMind core package
