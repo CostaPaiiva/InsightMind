@@ -9,6 +9,7 @@ from core.insights import generate_auto_insights
 from core.cleaning import clean_dataset, cleaning_plan_from_df
 from core.llm_chat import dataset_chat_answer
 from core.report import build_html_report, build_pdf_report
+from core.offline_chat import offline_answer
 
 st.set_page_config(page_title="InsightMind", layout="wide")
 st.title("🧠 InsightMind — AutoDashboard + Chat IA + Limpeza + Relatório")
@@ -149,7 +150,6 @@ with tabs[1]:
 # --- Chat IA
 
 # --- Chat IA
-# --- Chat IA
 with tabs[2]:
     st.markdown("### 💬 Pergunte ao seu dataset")
     st.caption("Ex.: “O que esse dataset diz?”, “Quais problemas de qualidade existem?”, “O que devo melhorar?”")
@@ -164,6 +164,16 @@ with tabs[2]:
         send = colb1.form_submit_button("Enviar")
         ask_default = colb2.form_submit_button("✨ O que esse dataset diz?")
 
+    # Cacheia para não recalcular a cada pergunta (melhora muito performance/estabilidade)
+    if "qm_cached" not in st.session_state:
+        st.session_state["qm_cached"] = make_quality_metrics(df)
+
+    if "summary_cached" not in st.session_state:
+        st.session_state["summary_cached"] = basic_summary(df).head(30)
+
+    if "insights_cached" not in st.session_state:
+        st.session_state["insights_cached"] = generate_auto_insights(df, use_llm=False)
+
     # Processa envio
     if send or ask_default:
         q_final = default_q if ask_default else (q or "").strip()
@@ -171,26 +181,25 @@ with tabs[2]:
         if not q_final:
             st.warning("Digite uma pergunta.")
         else:
-            # Cacheia para não recalcular a cada pergunta (melhora muito performance/estabilidade)
-            if "qm_cached" not in st.session_state:
-                st.session_state["qm_cached"] = make_quality_metrics(df)
-
-            if "summary_cached" not in st.session_state:
-                st.session_state["summary_cached"] = basic_summary(df).head(30)
-
-            if "insights_cached" not in st.session_state:
-                st.session_state["insights_cached"] = generate_auto_insights(df, use_llm=False)
-
             try:
                 with st.spinner("Gerando resposta..."):
-                    answer = dataset_chat_answer(
-                        question=q_final,
-                        df=df,
-                        quality_metrics=st.session_state["qm_cached"],
-                        auto_insights=st.session_state["insights_cached"],
-                        summary_table=st.session_state["summary_cached"],
-                        provider=provider_effective,
-                    )
+                    if provider_effective == "offline":
+                        answer = offline_answer(
+                            question=q_final,
+                            df=df,
+                            quality_metrics=st.session_state["qm_cached"],
+                            auto_insights=st.session_state["insights_cached"],
+                            summary_table=st.session_state["summary_cached"],
+                        )
+                    else:
+                        answer = dataset_chat_answer(
+                            question=q_final,
+                            df=df,
+                            quality_metrics=st.session_state["qm_cached"],
+                            auto_insights=st.session_state["insights_cached"],
+                            summary_table=st.session_state["summary_cached"],
+                            provider=provider_effective,
+                        )
 
                 st.session_state["chat_history"].append({
                     "id": str(uuid.uuid4()),
@@ -201,7 +210,6 @@ with tabs[2]:
 
             except Exception as e:
                 st.error(f"Erro ao gerar resposta: {e}")
-                # opcional: guardar no histórico como erro, para você ver depois
                 st.session_state["chat_history"].append({
                     "id": str(uuid.uuid4()),
                     "q": q_final,
@@ -209,20 +217,20 @@ with tabs[2]:
                 })
                 st.rerun()
 
-        st.caption(f"Provedor em uso: **{provider_effective}**")
-        st.markdown("---")
+    st.caption(f"Provedor em uso: **{provider_effective}**")
+    st.markdown("---")
 
-        # ✅ Respostas sempre embaixo
-        st.markdown("### Histórico (últimas 10)")
-        history_box = st.container()
-        with history_box:
-            last_10 = st.session_state["chat_history"][-10:]
-            for item in last_10:
-                with st.chat_message("user"):
-                    st.markdown(item["q"])
-                with st.chat_message("assistant"):
-                    st.write(item["a"])
-                st.divider()
+    # ✅ Respostas sempre embaixo
+    st.markdown("### Histórico (últimas 10)")
+    history_box = st.container()
+    with history_box:
+        last_10 = st.session_state["chat_history"][-10:]
+        for item in last_10:
+            with st.chat_message("user"):
+                st.markdown(item["q"])
+            with st.chat_message("assistant"):
+                st.write(item["a"])
+            st.divider()
 
 
 
