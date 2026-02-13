@@ -11,6 +11,18 @@ from core.llm_chat import dataset_chat_answer
 from core.report import build_html_report, build_pdf_report
 from core.offline_chat import offline_answer
 
+@st.cache_data(show_spinner=False)
+def cached_quality(df):
+    return make_quality_metrics(df)
+
+@st.cache_data(show_spinner=False)
+def cached_summary(df):
+    return basic_summary(df)
+
+@st.cache_data(show_spinner=False)
+def cached_insights(df):
+    return generate_auto_insights(df, use_llm=False)
+
 st.set_page_config(page_title="InsightMind", layout="wide")
 st.title("🧠 InsightMind — AutoDashboard + Chat IA + Limpeza + Relatório")
 
@@ -145,7 +157,7 @@ with tabs[0]:
 # --- Gráficos
 with tabs[1]:
     st.markdown("### Visualizações Avançadas")
-    render_visuals(df)
+    #render_visuals(df)
 
 # --- Chat IA
 
@@ -224,7 +236,7 @@ with tabs[2]:
     st.markdown("### Histórico (últimas 10)")
     history_box = st.container()
     with history_box:
-        last_10 = st.session_state["chat_history"][-10:]
+        last_10 = list(reversed(st.session_state["chat_history"][-10:]))
         for item in last_10:
             with st.chat_message("user"):
                 st.markdown(item["q"])
@@ -298,7 +310,7 @@ with tabs[4]:
 
     include_profiling = st.checkbox("Incluir profiling (HTML) do ydata-profiling", value=True)
 
-    figs = build_report_figures(df_for_report)
+    #figs = build_report_figures(df_for_report)
 
     colA, colB = st.columns(2)
     with colA:
@@ -315,5 +327,14 @@ with tabs[4]:
     with colB:
         if st.button("Gerar PDF"):
             with st.spinner("Montando PDF..."):
+                # ✅ Gere as figuras somente quando o usuário clicar (evita travar o app no carregamento)
+                figs = build_report_figures(df_for_report)
                 pdf_bytes = build_pdf_report(df_for_report, qm_for_report, insights_for_report, figs)
-            st.download_button("⬇️ Baixar relatório PDF", data=pdf_bytes, file_name="relatorio.pdf", mime="application/pdf")
+
+            st.download_button(
+                "⬇️ Baixar relatório PDF",
+                data=pdf_bytes,
+                file_name="relatorio.pdf",
+                mime="application/pdf"
+            )
+
