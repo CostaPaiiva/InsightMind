@@ -24,7 +24,7 @@ def cached_insights(df):
     return generate_auto_insights(df, use_llm=False)
 
 st.set_page_config(page_title="InsightMind", layout="wide")
-st.title("🧠 InsightMind — AutoDashboard + Chat IA + Limpeza + Relatório")
+st.title("🧠 InsightMind — AutoDashboard com Chat IA + Limpeza + Relatório")
 
 # ----------------------------
 # Chat UI (estrutura estável)
@@ -234,15 +234,49 @@ with tabs[2]:
 
     # ✅ Respostas sempre embaixo
     st.markdown("### Histórico (últimas 10)")
-    history_box = st.container()
-    with history_box:
-        last_10 = list(reversed(st.session_state["chat_history"][-10:]))
-        for item in last_10:
-            with st.chat_message("user"):
-                st.markdown(item["q"])
-            with st.chat_message("assistant"):
-                st.write(item["a"])
-            st.divider()
+
+    st.markdown(
+        """
+        <style>
+        .im-history { display: flex; flex-direction: column-reverse; gap: 10px; }
+        .im-msg { padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.12); }
+        .im-user { background: rgba(0, 123, 255, 0.08); }
+        .im-bot  { background: rgba(0, 200, 100, 0.08); }
+        .im-label { font-size: 12px; opacity: 0.75; margin-bottom: 6px; }
+        .im-text { white-space: pre-wrap; }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # ✅ mantém a ordem original no Python (sem reversed)
+    last_10 = st.session_state["chat_history"][-10:]
+
+    def _esc(s: str) -> str:
+        return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    html = ['<div class="im-history">']
+    for item in last_10:
+        q = _esc(item.get("q", ""))
+        a = _esc(item.get("a", ""))
+
+        html.append(
+            f"""
+            <div class="im-msg im-user">
+                <div class="im-label">Você</div>
+                <div class="im-text">{q}</div>
+            </div>
+            <div class="im-msg im-bot">
+                <div class="im-label">InsightMind</div>
+                <div class="im-text">{a}</div>
+            </div>
+            """
+        )
+    html.append("</div>")
+
+    st.markdown("".join(html), unsafe_allow_html=True)
+
+
 
 
 
