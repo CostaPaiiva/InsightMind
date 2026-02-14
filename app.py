@@ -130,60 +130,64 @@ with tabs[1]:
     # render_visuals(df)
 
 
-# --- 1. INICIALIZAÇÃO ---
+# --- 1. INICIALIZAÇÃO (Coloque no início do script, fora das abas) ---
 if "chat_history" not in st.session_state:
     st.session_state["chat_history"] = []
 
-provider_effective = llm_provider if use_llm else "offline"
-
+# --- DENTRO DA ABA DE CHAT ---
 with tabs[2]:
-    st.markdown("### 💬 Chat InsightMind")
+    st.markdown("### Pergunte.. Chat InsightMind")
     
     provider_effective = llm_provider if use_llm else "offline"
 
     # --- 1. ÁREA DE INPUT ---
-    # O segredo: Não processar o histórico no mesmo frame que o input se possível
     prompt = st.chat_input("Digite sua pergunta aqui...")
 
-    if st.button("🗑️ Limpar Conversa"):
+    if st.button("Limpar Histórico"):
         st.session_state["chat_history"] = []
         st.rerun()
 
     # --- 2. PROCESSAMENTO ---
     if prompt:
-        # Adicionamos ao histórico (usando append para manter a ordem natural no State)
         st.session_state["chat_history"].append({"role": "user", "content": prompt})
         
         try:
             with st.spinner("Analisando..."):
                 if provider_effective == "offline":
-                    answer = offline_answer(prompt, df, st.session_state.get("qm_cached"), st.session_state.get("insights_cached"), st.session_state.get("summary_cached"))
+                    answer = offline_answer(
+                        prompt, 
+                        df, 
+                        st.session_state.get("qm_cached"), 
+                        st.session_state.get("insights_cached"), 
+                        st.session_state.get("summary_cached")
+                    )
                 else:
-                    answer = dataset_chat_answer(prompt, df, st.session_state.get("qm_cached"), st.session_state.get("insights_cached"), st.session_state.get("summary_cached"), provider_effective)
+                    answer = dataset_chat_answer(
+                        prompt, 
+                        df, 
+                        st.session_state.get("qm_cached"), 
+                        st.session_state.get("insights_cached"), 
+                        st.session_state.get("summary_cached"), 
+                        provider_effective
+                    )
             
             st.session_state["chat_history"].append({"role": "assistant", "content": answer})
             st.rerun()
+            
         except Exception as e:
             st.error(f"Erro: {e}")
 
     st.markdown("---")
 
-    # --- 3. EXIBIÇÃO (A PARTE QUE DAVA ERRO) ---
-    # Criamos um container fixo
-    chat_placeholder = st.container()
+    # --- 3. EXIBIÇÃO SEGURA ---
+    # O container isola a renderização das mensagens para evitar o erro removeChild
+    chat_container = st.container()
 
-    with chat_placeholder:
-        # Pegamos as últimas 10 mensagens e INVERTEMOS para exibição
-        # O segredo para não dar erro de Node é dar uma KEY ÚNICA para cada balão
-        display_msg = st.session_state["chat_history"][-10:][::-1]
-        
-        for i, msg in enumerate(display_msg):
-            # A key aqui é o segredo. Se o conteúdo mudar, a key muda e o React recria o nó
-            # em vez de tentar remover o antigo.
-            msg_key = f"msg_{len(st.session_state['chat_history'])}_{i}"
+    with chat_container:
+        # Exibe as últimas 20 mensagens do histórico
+        for i, msg in enumerate(st.session_state["chat_history"][-8:]):
             with st.chat_message(msg["role"]):
-                st.write(msg["content"])
-
+                st.markdown(msg["content"])
 
 # --- Limpeza
 with tabs[3]:
