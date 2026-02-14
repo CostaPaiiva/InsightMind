@@ -208,16 +208,15 @@ with tabs[2]:
     st.markdown("### Histórico (últimas 10 mensagens)")
 
     last_10 = st.session_state["chat_history"][-10:]
-    hist_box = st.container()
-    with hist_box:
-        for item in last_10:
+
+    with st.container():
+        for item in reversed(last_10):  # ✅ mais novo em cima
             role = item.get("role", "assistant")
             content = item.get("content", "")
-            mid = item.get("id", str(uuid.uuid4()))
 
-            # ✅ key estável por mensagem
-            with st.chat_message(role, key=f"hist_{mid}"):
+            with st.chat_message(role):
                 st.markdown(content)
+
 
 
 # --- Limpeza
