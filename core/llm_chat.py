@@ -1,18 +1,9 @@
 import json
 import streamlit as st
 import pandas as pd
-
 from openai import OpenAI
-from openai import (
-    RateLimitError,
-    AuthenticationError,
-    APIConnectionError,
-    BadRequestError,
-    APIStatusError,
-)
-
-from core.fallback_chat import offline_answer
-
+from openai import RateLimitError, AuthenticationError, APIConnectionError, BadRequestError, APIStatusError
+from core.offline_chat import offline_answer
 
 def _openai_client() -> OpenAI:
     api_key = st.secrets.get("OPENAI_API_KEY", None)
@@ -20,118 +11,48 @@ def _openai_client() -> OpenAI:
         raise RuntimeError("OPENAI_API_KEY ausente")
     return OpenAI(api_key=api_key)
 
-
-def _build_context(
-    df: pd.DataFrame,
-    quality_metrics: dict,
-    auto_insights: list[str],
-    summary_table: pd.DataFrame
-) -> dict:
-    # garante que summary_table não explode em tipos não-serializáveis
+def _build_context(df: pd.DataFrame, quality_metrics: dict, auto_insights: list[str], summary_table: pd.DataFrame) -> dict:
     summary_records = []
     if summary_table is not None and not summary_table.empty:
-        summary_records = summary_table.head(50).to_dict(orient="records")
-
+        summary_records = summary_table.head(30).to_dict(orient="records")
     return {
         "shape": {"rows": int(df.shape[0]), "cols": int(df.shape[1])},
-        "columns": list(df.columns)[:200],
+        "columns": list(df.columns)[:100],
         "quality_metrics": quality_metrics or {},
-        "auto_insights": (auto_insights or [])[:25],
+        "auto_insights": (auto_insights or [])[:20],
         "summary_table_sample": summary_records,
-        "sample_rows": df.head(15).to_dict(orient="records"),
+        "sample_rows": df.head(10).to_dict(orient="records"),
     }
 
-
 def _system_prompt() -> str:
-    return (
-        "Você é um analista de dados sênior. Responda em PT-BR, com objetividade. "
-        "Baseie-se SOMENTE no contexto fornecido (não invente colunas/valores). "
-        "Traga: (1) visão geral, (2) achados, (3) problemas de qualidade, (4) recomendações práticas. "
-        "Se algo não estiver no contexto, diga que não dá para afirmar."
-    )
-
+    return "Você é um analista sênior. Responda em PT-BR de forma estruturada. Use Markdown para tabelas."
 
 def _answer_with_openai(question: str, context: dict) -> str:
-    model = st.secrets.get("OPENAI_MODEL", "gpt-4.1-mini")
-    system = _system_prompt()
-
-    # Contexto em JSON para reduzir ambiguidades
-    context_json = json.dumps(context, ensure_ascii=False)
-
+    model = st.secrets.get("OPENAI_MODEL", "gpt-3.5-turbo") # ou seu modelo preferido
     client = _openai_client()
-    resp = client.responses.create(
-        model=model,
-        input=[
-            {"role": "system", "content": system},
-            {
-                "role": "user",
-                "content": f"Pergunta: {question}\n\nContexto do dataset (JSON):\n{context_json}",
-            },
-        ],
-    )
-    return resp.output_text
-
-
-def _answer_with_ollama(question: str, context: dict) -> str:
-    # requer: pip install ollama + ollama instalado/rodando
-    import ollama
-
-    # ✅ corrigido
-    model = st.secrets.get("OLLAMA_MODEL", "llama3.2:1b")
-    system = _system_prompt()
-
     context_json = json.dumps(context, ensure_ascii=False)
 
-    prompt = f"{system}\n\nPergunta: {question}\n\nContexto do dataset (JSON):\n{context_json}"
-
-    r = ollama.chat(
+    # ✅ Corrigido para a API estável atual
+    resp = client.chat.completions.create(
         model=model,
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {"role": "system", "content": _system_prompt()},
+            {"role": "user", "content": f"Pergunta: {question}\nContexto: {context_json}"}
+        ]
     )
-    return r["message"]["content"]
+    return resp.choices[0].message.content.strip()
 
-
-def dataset_chat_answer(
-    question: str,
-    df: pd.DataFrame,
-    quality_metrics: dict,
-    auto_insights: list[str],
-    summary_table: pd.DataFrame,
-    provider: str = "auto",  # "auto" | "openai" | "ollama" | "offline"
-) -> str:
-    """
-    provider:
-      - auto: tenta OpenAI; se falhar, tenta Ollama; se falhar, offline
-      - openai: só OpenAI
-      - ollama: só Ollama
-      - offline: heurístico
-    """
+def dataset_chat_answer(question: str, df: pd.DataFrame, quality_metrics: dict, auto_insights: list[str], summary_table: pd.DataFrame, provider: str = "auto") -> str:
     context = _build_context(df, quality_metrics, auto_insights, summary_table)
-
+    
     if provider == "offline":
-        return offline_answer(question, df)
+        return offline_answer(question, df, quality_metrics, auto_insights, summary_table)
 
     if provider in ("auto", "openai"):
         try:
             return _answer_with_openai(question, context)
-        except RateLimitError:
-            if provider == "openai":
-                return "⚠️ OpenAI: sem cota/créditos (429). Troque o provedor para Ollama ou Offline."
-        except AuthenticationError:
-            if provider == "openai":
-                return "❌ OpenAI: API Key inválida/ausente. Configure OPENAI_API_KEY ou use Ollama/Offline."
-        except (APIConnectionError, APIStatusError, BadRequestError):
-            if provider == "openai":
-                return "⚠️ OpenAI: erro na chamada. Troque para Ollama/Offline."
-        except Exception:
-            if provider == "openai":
-                return "⚠️ OpenAI: erro inesperado. Troque para Ollama/Offline."
-
-    if provider in ("auto", "ollama"):
-        try:
-            return _answer_with_ollama(question, context)
-        except Exception:
-            if provider == "ollama":
-                return "⚠️ Ollama indisponível. Verifique se o Ollama está instalado/rodando e se o modelo foi baixado."
-
-    return offline_answer(question, df)
+        except Exception as e:
+            if provider == "openai": return f"⚠️ Erro OpenAI: {e}"
+    
+    # Fallback para offline caso tudo falhe
+    return offline_answer(question, df, quality_metrics, auto_insights, summary_table)
