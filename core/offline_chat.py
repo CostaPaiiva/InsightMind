@@ -16,7 +16,6 @@ def _basic_shape(df: pd.DataFrame) -> tuple[int, int]:
 
 
 def _esc_col(col: str) -> str:
-    # mantém nome de coluna seguro p/ exibição
     return str(col)
 
 
@@ -27,11 +26,9 @@ def _dtype_report(df: pd.DataFrame, col: str) -> str:
     s = df[col]
     dtype = str(s.dtype)
 
-    # Inteiro (inclui pandas nullable Int64)
     if pd.api.types.is_integer_dtype(s):
         return f"A coluna **{_esc_col(col)}** está como **inteiro** ({dtype})."
 
-    # Float (checa se é 'inteiro disfarçado' por causa de NaN)
     if pd.api.types.is_float_dtype(s):
         s_num = pd.to_numeric(s, errors="coerce").dropna()
         if len(s_num) > 0 and (s_num % 1 == 0).all():
@@ -41,7 +38,6 @@ def _dtype_report(df: pd.DataFrame, col: str) -> str:
             )
         return f"A coluna **{_esc_col(col)}** está como **float** ({dtype})."
 
-    # Boolean / datetime / object etc.
     if pd.api.types.is_bool_dtype(s):
         return f"A coluna **{_esc_col(col)}** está como **booleano** ({dtype})."
     if pd.api.types.is_datetime64_any_dtype(s):
@@ -54,26 +50,16 @@ def _dtype_report(df: pd.DataFrame, col: str) -> str:
 
 
 def _parse_dtype_question(q: str) -> str | None:
-    """
-    Detecta perguntas do tipo:
-    - "coluna id tem inteiro ou float?"
-    - "a coluna idade é int ou float?"
-    - "tipo da coluna customer_id"
-    Retorna o nome da coluna, se detectar.
-    """
     q = q.strip().lower()
 
-    # "tipo da coluna X" / "qual o tipo da coluna X"
     m = re.search(r"\b(tipo|dtype)\s+(da|do)\s+coluna\s+([a-zA-Z0-9_]+)\b", q)
     if m:
         return m.group(3)
 
-    # "coluna X é int/float?"
     m = re.search(r"\bcoluna\s+([a-zA-Z0-9_]+)\s+(tem|é)\s+(inteiro|int|float|decimal)\b", q)
     if m:
         return m.group(1)
 
-    # caso específico: "coluna id tem inteiro ou float?"
     if "coluna id" in q and ("inteiro" in q or "int" in q or "float" in q):
         return "id"
 
@@ -83,17 +69,16 @@ def _parse_dtype_question(q: str) -> str | None:
 def offline_answer(
     question: str,
     df: pd.DataFrame,
-    quality_metrics: dict,
-    auto_insights: list | str,
-    summary_table: pd.DataFrame,
+    quality_metrics: dict | None = None,
+    auto_insights: list | str | None = None,
+    summary_table: pd.DataFrame | None = None,
 ) -> str:
     q_raw = (question or "").strip()
     q = q_raw.lower()
 
-    # 1) Perguntas sobre tipo/dtype de coluna (ex.: "coluna id é int ou float?")
+    # 1) Perguntas sobre tipo/dtype de coluna
     col_asked = _parse_dtype_question(q)
     if col_asked:
-        # tenta casar por nome exato; se não achar, tenta case-insensitive
         if col_asked not in df.columns:
             lower_map = {str(c).lower(): str(c) for c in df.columns}
             if col_asked.lower() in lower_map:
@@ -132,6 +117,8 @@ def offline_answer(
         else:
             for it in auto_insights[:8]:
                 insights_block.append(f"- {it}")
+    elif auto_insights is None:
+        insights_block.append("- (Sem insights automáticos no momento.)")
     else:
         insights_block.append(str(auto_insights))
 
@@ -154,14 +141,16 @@ def offline_answer(
 
     if re.search(r"\b(resumo|summary|estat)\b", q):
         lines = ["**Resumo estatístico (amostra)**"]
-        try:
-            lines.append(summary_table.head(15).to_string())
-        except Exception:
-            lines.append(str(summary_table.head(15)))
+        if summary_table is None:
+            lines.append("(Resumo indisponível: summary_table não foi fornecida.)")
+        else:
+            try:
+                lines.append(summary_table.head(15).to_string())
+            except Exception:
+                lines.append(str(summary_table.head(15)))
         return "\n".join(overview + [""] + lines + recs)
 
     if re.search(r"\b(insight|achad|descobr)\b", q):
         return "\n".join(overview + insights_block + recs)
 
-    # 4) Default
     return "\n".join(overview + quality_block + missing_block + insights_block + recs)
