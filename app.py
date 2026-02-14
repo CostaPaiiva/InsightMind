@@ -130,7 +130,11 @@ with tabs[1]:
     # render_visuals(df)
 
 
-# --- Chat IA
+# --- Inicialização no topo do arquivo ---
+if "chat_history" not in st.session_state:
+    st.session_state["chat_history"] = []
+
+# Suprepondo que tabs já foi definido anteriormente:
 with tabs[2]:
     st.markdown("### 💬 Pergunte ao seu dataset")
     st.caption("Ex.: “O que esse dataset diz?”, “Quais problemas de qualidade existem?”, “O que devo melhorar?”")
@@ -138,14 +142,16 @@ with tabs[2]:
     provider_effective = llm_provider if use_llm else "offline"
     default_q = "O que esse dataset diz? Traga visão geral, achados importantes, problemas de qualidade e recomendações práticas."
 
-    # ✅ Caixa de pergunta em cima (Enter envia)
+    # --- Área do Formulário de Pergunta ---
+    # clear_on_submit=True limpa o campo no navegador automaticamente sem erro de state
     with st.form("chat_form", clear_on_submit=True):
-        q = st.text_input("Digite sua pergunta e pressione Enter…", value="")
+        q = st.text_input("Digite sua pergunta e pressione Enter…", key="input_usuario")
+        
         colb1, colb2 = st.columns([1, 1])
         send = colb1.form_submit_button("Enviar")
         ask_default = colb2.form_submit_button("✨ O que esse dataset diz?")
 
-    # Cache para performance/estabilidade
+    # --- Cache de Métricas (Mantendo sua lógica original) ---
     if "qm_cached" not in st.session_state:
         st.session_state["qm_cached"] = make_quality_metrics(df)
     if "summary_cached" not in st.session_state:
@@ -153,15 +159,15 @@ with tabs[2]:
     if "insights_cached" not in st.session_state:
         st.session_state["insights_cached"] = generate_auto_insights(df, use_llm=False)
 
-    # Processa envio
+    # --- Processamento da Resposta ---
     if send or ask_default:
-        q_final = default_q if ask_default else (q or "").strip()
+        q_final = default_q if ask_default else q.strip()
 
         if not q_final:
-            st.warning("Digite uma pergunta.")
+            st.warning("⚠️ Por favor, digite uma pergunta.")
         else:
             try:
-                with st.spinner("Gerando resposta..."):
+                with st.spinner("Analisando dados e gerando resposta..."):
                     if provider_effective == "offline":
                         answer = offline_answer(
                             question=q_final,
@@ -180,42 +186,49 @@ with tabs[2]:
                             provider=provider_effective,
                         )
 
-                # ✅ salva como mensagens individuais (estável pro Streamlit)
-                st.session_state["chat_history"].append(
-                    {"id": str(uuid.uuid4()), "role": "user", "content": q_final}
-                )
-                st.session_state["chat_history"].append(
-                    {"id": str(uuid.uuid4()), "role": "assistant", "content": answer}
-                )
-
+                # ✅ Salva no histórico com IDs estáveis
+                st.session_state["chat_history"].append({
+                    "id": str(uuid.uuid4()), 
+                    "role": "user", 
+                    "content": q_final
+                })
+                st.session_state["chat_history"].append({
+                    "id": str(uuid.uuid4()), 
+                    "role": "assistant", 
+                    "content": answer
+                })
+                
+                # ✅ Rerun para atualizar a lista de histórico na tela
                 st.rerun()
 
             except Exception as e:
-                st.error(f"Erro ao gerar resposta: {e}")
+                st.error(f"Erro ao processar: {e}")
 
-                st.session_state["chat_history"].append(
-                    {"id": str(uuid.uuid4()), "role": "user", "content": q_final}
-                )
-                st.session_state["chat_history"].append(
-                    {"id": str(uuid.uuid4()), "role": "assistant", "content": f"⚠️ Erro ao gerar resposta: {e}"}
-                )
-
-                st.rerun()
-
+    # --- Rodapé e Histórico ---
     st.caption(f"Provedor em uso: **{provider_effective}**")
     st.markdown("---")
 
-    st.markdown("### Histórico (últimas 10 mensagens)")
+    # Cabeçalho do histórico com botão de limpar
+    col_hist, col_limpar = st.columns([3, 1])
+    with col_hist:
+        st.markdown("### Histórico (últimas 10 mensagens)")
+    with col_limpar:
+        if st.button("🗑️ Limpar"):
+            st.session_state["chat_history"] = []
+            st.rerun()
 
-    last_10 = st.session_state["chat_history"][-10:]
-
+    # Container de exibição das mensagens
     with st.container():
-        for item in reversed(last_10):  # ✅ mais novo em cima
-            role = item.get("role", "assistant")
-            content = item.get("content", "")
-
-            with st.chat_message(role):
-                st.markdown(content)
+        # Pegamos as últimas 10 mensagens do estado atualizado
+        last_10 = st.session_state["chat_history"][-10:]
+        
+        if not last_10:
+            st.info("Aguardando sua primeira pergunta...")
+        else:
+            for item in last_10:
+                # IMPORTANTE: st.chat_message SEM parâmetro 'key'
+                with st.chat_message(item["role"]):
+                    st.markdown(item["content"])
 
 
 
