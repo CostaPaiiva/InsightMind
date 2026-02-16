@@ -2,15 +2,13 @@ import streamlit as st
 import pandas as pd
 import uuid
 
+
 from core.loader import load_csv_smart
 from core.profiler import make_quality_metrics, basic_summary
 from core.visuals import render_visuals, build_report_figures
 from core.insights import generate_auto_insights
 from core.cleaning import clean_dataset, cleaning_plan_from_df
-from core.llm_chat import dataset_chat_answer
 from core.report import build_html_report, build_pdf_report
-from core.offline_chat import offline_answer
-
 
 @st.cache_data(show_spinner=False)
 def cached_quality(df: pd.DataFrame):
