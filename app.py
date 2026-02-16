@@ -74,14 +74,6 @@ def llm_respond_fn(user_prompt: str, history: list[dict]) -> str:
 # ----------------------------
 with st.sidebar:
     st.header("⚙️ Configurações")
-    use_llm = st.toggle("Ativar Chat IA (LLM)", value=True)
-
-    llm_provider = st.selectbox(
-        "Provedor do Chat IA",
-        ["auto", "openai", "ollama", "offline"],
-        index=0,
-        help="auto: tenta OpenAI → Ollama → offline",
-    )
 
     max_rows_preview = st.slider("Linhas no preview", 10, 200, 50)
     st.markdown("---")
@@ -106,7 +98,7 @@ st.caption(
 )
 st.dataframe(df.head(max_rows_preview), use_container_width=True)
 
-tabs = st.tabs(["📌 Resumo", "📈 Gráficos", "💬 Chat IA", "🧼 Limpeza", "🧾 Relatório"])
+tabs = st.tabs(["📌 Resumo", "📈 Gráficos", "✅ Diagnóstico", "🧼 Limpeza", "🧾 Relatório"])
 
 
 # --- Resumo
