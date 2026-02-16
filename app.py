@@ -126,58 +126,73 @@ if "chat_history" not in st.session_state:
 
 # --- DENTRO DA ABA DE CHAT ---
 with tabs[2]:
-    st.markdown("### Pergunte.. Chat InsightMind")
-    
-    provider_effective = llm_provider if use_llm else "offline"
+    st.markdown("### ✅ Diagnóstico Automático do Dataset")
+    st.caption("Análise automática: qualidade, riscos, insights e recomendações.")
 
-    # --- 1. ÁREA DE INPUT ---
-    prompt = st.chat_input("Digite sua pergunta aqui...")
+    df_diag = st.session_state.get("df_clean", df)
 
-    if st.button("Limpar Histórico"):
-        st.session_state["chat_history"] = []
-        st.rerun()
+    # cache (você já usa algo parecido)
+    qm = make_quality_metrics(df_diag)
+    summary_df = basic_summary(df_diag)
+    insights = generate_auto_insights(df_diag, use_llm=False)
 
-    # --- 2. PROCESSAMENTO ---
-    if prompt:
-        st.session_state["chat_history"].append({"role": "user", "content": prompt})
-        
-        try:
-            with st.spinner("Analisando..."):
-                if provider_effective == "offline":
-                    answer = offline_answer(
-                        prompt, 
-                        df, 
-                        st.session_state.get("qm_cached"), 
-                        st.session_state.get("insights_cached"), 
-                        st.session_state.get("summary_cached")
-                    )
-                else:
-                    answer = dataset_chat_answer(
-                        prompt, 
-                        df, 
-                        st.session_state.get("qm_cached"), 
-                        st.session_state.get("insights_cached"), 
-                        st.session_state.get("summary_cached"), 
-                        provider_effective
-                    )
-            
-            st.session_state["chat_history"].append({"role": "assistant", "content": answer})
-            st.rerun()
-            
-        except Exception as e:
-            st.error(f"Erro: {e}")
+    col1, col2 = st.columns([1, 1])
+
+    with col1:
+        st.markdown("#### 📊 Métricas de Qualidade")
+        st.json(qm)
+
+    with col2:
+        st.markdown("#### 🧾 Resumo Estatístico (top 30)")
+        st.dataframe(summary_df.head(30), use_container_width=True)
 
     st.markdown("---")
+    st.markdown("#### 🔥 Principais Problemas (prioridade)")
 
-    # --- 3. EXIBIÇÃO SEGURA ---
-    # O container isola a renderização das mensagens para evitar o erro removeChild
-    chat_container = st.container()
+    # Exemplo de priorização (ajusta conforme seu qm real)
+    issues = []
 
-    with chat_container:
-        # Exibe as últimas 20 mensagens do histórico
-        for i, msg in enumerate(st.session_state["chat_history"][-8:]):
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+    # tenta usar chaves comuns (se existirem no seu make_quality_metrics)
+    miss_rate = qm.get("missing_rate", None)
+    dup_rows = qm.get("duplicate_rows", None)
+    const_cols = qm.get("constant_cols", None)
+    high_missing_cols = qm.get("high_missing_cols", None)
+
+    if miss_rate is not None and miss_rate > 0:
+        issues.append(("Missing elevado", f"Taxa de missing: {miss_rate}"))
+    if dup_rows:
+        issues.append(("Duplicadas", f"Linhas duplicadas: {dup_rows}"))
+    if const_cols:
+        issues.append(("Colunas constantes", f"{const_cols}"))
+    if high_missing_cols:
+        issues.append(("Colunas com missing alto", f"{high_missing_cols}"))
+
+    if not issues:
+        st.success("Nenhum problema crítico detectado nas métricas principais.")
+    else:
+        for title, detail in issues[:10]:
+            st.warning(f"**{title}** — {detail}")
+
+    st.markdown("---")
+    st.markdown("#### 💡 Insights Automáticos")
+    if not insights:
+        st.info("Sem insights automáticos relevantes.")
+    else:
+        for it in insights[:15]:
+            st.markdown(f"- {it}")
+
+    st.markdown("---")
+    st.markdown("#### ✅ Recomendações Práticas (automáticas)")
+    st.markdown(
+        "\n".join([
+            "- Trate missing nas colunas mais críticas (imputar/remover conforme o caso).",
+            "- Remova duplicadas e colunas constantes (se existirem).",
+            "- Padronize strings e valide datas (parse e consistência).",
+            "- Revise outliers em numéricas (IQR/clip) se distorcem métricas.",
+            "- Se houver colunas ID com alta cardinalidade, evite usar diretamente como feature."
+        ])
+    )
+
 
 # --- Limpeza
 with tabs[3]:
