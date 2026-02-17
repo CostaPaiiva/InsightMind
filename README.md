@@ -51,23 +51,6 @@ Dashboard automático para análise de datasets (CSV) com **qualidade de dados**
 
 ---
 
-## 🧱 Estrutura do Projeto
-
-InsightMind/
-├─ app.py
-├─ core/
-│ ├─ loader.py
-│ ├─ profiler.py
-│ ├─ insights.py
-│ ├─ visuals.py
-│ ├─ cleaning.py
-│ ├─ report.py
-├─ requirements.txt
-└─ README.md
-
-
----
-
 ## 🚀 Como rodar localmente
 
 ### 1) Criar ambiente virtual
