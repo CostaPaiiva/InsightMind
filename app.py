@@ -2,13 +2,22 @@ import streamlit as st
 import pandas as pd
 import uuid
 
-
 from core.loader import load_csv_smart
 from core.profiler import make_quality_metrics, basic_summary
 from core.visuals import render_visuals, build_report_figures
 from core.insights import generate_auto_insights
 from core.cleaning import clean_dataset, cleaning_plan_from_df
 from core.report import build_html_report, build_pdf_report
+
+
+# ----------------------------
+# Cache pesado (ganho grande)
+# ----------------------------
+@st.cache_data(show_spinner=False)
+def cached_load_csv(file) -> tuple[pd.DataFrame, dict]:
+    # Cacheia leitura/parsing do CSV
+    return load_csv_smart(file)
+
 
 @st.cache_data(show_spinner=False)
 def cached_quality(df: pd.DataFrame):
@@ -25,48 +34,11 @@ def cached_insights(df: pd.DataFrame):
     return generate_auto_insights(df, use_llm=False)
 
 
+# ----------------------------
+# App
+# ----------------------------
 st.set_page_config(page_title="InsightMind", layout="wide")
-st.title("🧠 InsightMind — AutoDashboard com Chat IA + Limpeza + Relatório")
-
-
-# ----------------------------
-# Wrappers opcionais (não quebrar)
-# ----------------------------
-def respond_with_ollama(user_prompt: str, history: list[dict]) -> str:
-    df = st.session_state.get("df_clean", st.session_state.get("df_raw"))
-    if df is None:
-        return "Envie um CSV para começarmos."
-
-    return dataset_chat_answer(
-        question=user_prompt,
-        df=df,
-        quality_metrics=make_quality_metrics(df),
-        auto_insights=generate_auto_insights(df, use_llm=False),
-        summary_table=basic_summary(df).head(30),
-        provider="ollama",
-    )
-
-
-def respond_with_fallback(user_prompt: str, history: list[dict]) -> str:
-    df = st.session_state.get("df_clean", st.session_state.get("df_raw"))
-    if df is None:
-        return "Envie um CSV para começarmos."
-
-    return dataset_chat_answer(
-        question=user_prompt,
-        df=df,
-        quality_metrics=make_quality_metrics(df),
-        auto_insights=generate_auto_insights(df, use_llm=False),
-        summary_table=basic_summary(df).head(30),
-        provider="offline",
-    )
-
-
-def llm_respond_fn(user_prompt: str, history: list[dict]) -> str:
-    try:
-        return respond_with_ollama(user_prompt, history)
-    except Exception:
-        return respond_with_fallback(user_prompt, history)
+st.title("🧠 InsightMind — AutoDashboard + Limpeza + Relatório")
 
 
 # ----------------------------
@@ -74,7 +46,6 @@ def llm_respond_fn(user_prompt: str, history: list[dict]) -> str:
 # ----------------------------
 with st.sidebar:
     st.header("⚙️ Configurações")
-
     max_rows_preview = st.slider("Linhas no preview", 10, 200, 50)
     st.markdown("---")
     file = st.file_uploader("📁 Envie um CSV", type=["csv"])
@@ -85,18 +56,28 @@ if not file:
     st.stop()
 
 
-df, meta = load_csv_smart(file)
-st.session_state["df_raw"] = df.copy()
+# ✅ leitura cacheada
+df, meta = cached_load_csv(file)
+st.session_state["df_raw"] = df  # sem copy() para não gastar memória
 
-# Histórico do chat do tab (mensagens individuais)
+
+# Estado inicial
 if "chat_history" not in st.session_state:
     st.session_state["chat_history"] = []
+if "df_clean" not in st.session_state:
+    # não cria df_clean aqui; só quando usuário aplicar limpeza
+    pass
 
+
+# Preview
 st.subheader("🧾 Preview do dataset")
 st.caption(
     f"Linhas: {df.shape[0]} | Colunas: {df.shape[1]} | Encoding: {meta.get('encoding')} | Sep: {meta.get('sep')}"
 )
-st.dataframe(df.head(max_rows_preview), use_container_width=True)
+
+df_preview = df.head(max_rows_preview)
+st.dataframe(df_preview, use_container_width=True)
+
 
 tabs = st.tabs(["📌 Resumo", "📈 Gráficos", "✅ Diagnóstico", "🧼 Limpeza", "🧾 Relatório"])
 
@@ -104,59 +85,66 @@ tabs = st.tabs(["📌 Resumo", "📈 Gráficos", "✅ Diagnóstico", "🧼 Limpe
 # --- Resumo
 with tabs[0]:
     colA, colB = st.columns([1, 1])
+
     with colA:
         st.markdown("### Resumo Estatístico")
-        summary_df = basic_summary(df)
-        st.dataframe(summary_df, use_container_width=True)
+        # ✅ cacheado
+        summary_df = cached_summary(df)
+        st.dataframe(summary_df.head(200), use_container_width=True)
+
     with colB:
         st.markdown("### Métricas de Qualidade")
-        qm = make_quality_metrics(df)
+        # ✅ cacheado
+        qm = cached_quality(df)
         st.json(qm)
 
 
 # --- Gráficos
 with tabs[1]:
     st.markdown("### Visualizações Avançadas")
-    # render_visuals(df)
+    st.caption("Para evitar lentidão, os gráficos só são gerados quando você clicar no botão.")
+
+    df_plot = st.session_state.get("df_clean", df)
+
+    if st.button("📈 Gerar gráficos"):
+        try:
+            render_visuals(df_plot)
+        except Exception as e:
+            st.error(f"Erro ao renderizar gráficos: {e}")
+            st.exception(e)
+    else:
+        st.info("Clique em **📈 Gerar gráficos** para carregar as visualizações.")
 
 
-# --- 1. INICIALIZAÇÃO (Coloque no início do script, fora das abas) ---
-if "chat_history" not in st.session_state:
-    st.session_state["chat_history"] = []
-
-# --- DENTRO DA ABA DE CHAT ---
+# --- Diagnóstico
 with tabs[2]:
     st.markdown("### ✅ Diagnóstico Automático do Dataset")
     st.caption("Análise automática: qualidade, riscos, insights e recomendações.")
 
     df_diag = st.session_state.get("df_clean", df)
 
-    # cache (você já usa algo parecido)
-    qm = make_quality_metrics(df_diag)
-    summary_df = basic_summary(df_diag)
-    insights = generate_auto_insights(df_diag, use_llm=False)
+    # ✅ cacheado
+    qm_diag = cached_quality(df_diag)
+    summary_diag = cached_summary(df_diag)
+    insights_diag = cached_insights(df_diag)
 
     col1, col2 = st.columns([1, 1])
-
     with col1:
         st.markdown("#### 📊 Métricas de Qualidade")
-        st.json(qm)
+        st.json(qm_diag)
 
     with col2:
         st.markdown("#### 🧾 Resumo Estatístico (top 30)")
-        st.dataframe(summary_df.head(30), use_container_width=True)
+        st.dataframe(summary_diag.head(30), use_container_width=True)
 
     st.markdown("---")
     st.markdown("#### 🔥 Principais Problemas (prioridade)")
 
-    # Exemplo de priorização (ajusta conforme seu qm real)
     issues = []
-
-    # tenta usar chaves comuns (se existirem no seu make_quality_metrics)
-    miss_rate = qm.get("missing_rate", None)
-    dup_rows = qm.get("duplicate_rows", None)
-    const_cols = qm.get("constant_cols", None)
-    high_missing_cols = qm.get("high_missing_cols", None)
+    miss_rate = qm_diag.get("missing_rate", None)
+    dup_rows = qm_diag.get("duplicate_rows", None)
+    const_cols = qm_diag.get("constant_cols", None)
+    high_missing_cols = qm_diag.get("high_missing_cols", None)
 
     if miss_rate is not None and miss_rate > 0:
         issues.append(("Missing elevado", f"Taxa de missing: {miss_rate}"))
@@ -175,22 +163,24 @@ with tabs[2]:
 
     st.markdown("---")
     st.markdown("#### 💡 Insights Automáticos")
-    if not insights:
+    if not insights_diag:
         st.info("Sem insights automáticos relevantes.")
     else:
-        for it in insights[:15]:
+        for it in insights_diag[:15]:
             st.markdown(f"- {it}")
 
     st.markdown("---")
     st.markdown("#### ✅ Recomendações Práticas (automáticas)")
     st.markdown(
-        "\n".join([
-            "- Trate missing nas colunas mais críticas (imputar/remover conforme o caso).",
-            "- Remova duplicadas e colunas constantes (se existirem).",
-            "- Padronize strings e valide datas (parse e consistência).",
-            "- Revise outliers em numéricas (IQR/clip) se distorcem métricas.",
-            "- Se houver colunas ID com alta cardinalidade, evite usar diretamente como feature."
-        ])
+        "\n".join(
+            [
+                "- Trate missing nas colunas mais críticas (imputar/remover conforme o caso).",
+                "- Remova duplicadas e colunas constantes (se existirem).",
+                "- Padronize strings e valide datas (parse e consistência).",
+                "- Revise outliers em numéricas (IQR/clip) se distorcem métricas.",
+                "- Se houver colunas ID com alta cardinalidade, evite usar diretamente como feature.",
+            ]
+        )
     )
 
 
@@ -237,9 +227,13 @@ with tabs[3]:
         st.session_state["clean_log"] = log
         st.success("Limpeza aplicada!")
 
+        # ✅ opcional: limpar caches dependentes (quando df_clean muda, caches do df original não atrapalham;
+        # mas se você quiser forçar recálculo, descomente):
+        # st.cache_data.clear()
+
     if "df_clean" in st.session_state:
         st.markdown("#### 📄 Log da limpeza")
-        for item in st.session_state["clean_log"]:
+        for item in st.session_state.get("clean_log", []):
             st.write(f"- {item}")
 
         st.markdown("#### ✅ Preview do dataset tratado")
@@ -259,8 +253,6 @@ with tabs[4]:
     st.caption("Gera um HTML interativo e um PDF (com imagens dos principais gráficos).")
 
     df_for_report = st.session_state.get("df_clean", df)
-    qm_for_report = make_quality_metrics(df_for_report)
-    insights_for_report = generate_auto_insights(df_for_report, use_llm=False)
 
     include_profiling = st.checkbox("Incluir profiling (HTML) do ydata-profiling", value=True)
 
@@ -268,6 +260,10 @@ with tabs[4]:
     with colA:
         if st.button("Gerar HTML"):
             with st.spinner("Montando HTML..."):
+                # ✅ cacheado (rápido)
+                qm_for_report = cached_quality(df_for_report)
+                insights_for_report = cached_insights(df_for_report)
+
                 html_bytes = build_html_report(
                     df_for_report,
                     qm_for_report,
@@ -284,6 +280,10 @@ with tabs[4]:
     with colB:
         if st.button("Gerar PDF"):
             with st.spinner("Montando PDF..."):
+                # ✅ cacheado + gera figs só no clique
+                qm_for_report = cached_quality(df_for_report)
+                insights_for_report = cached_insights(df_for_report)
+
                 figs = build_report_figures(df_for_report)
                 pdf_bytes = build_pdf_report(df_for_report, qm_for_report, insights_for_report, figs)
 
