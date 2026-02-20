@@ -6,6 +6,8 @@ Dashboard automático para análise de datasets (CSV) com **qualidade de dados**
 
 ---
 
+Linkedin:https://www.linkedin.com/feed/update/urn:li:ugcPost:7430643056678166528/
+
 ## ✅ Funcionalidades
 
 ### 1) Upload inteligente de CSV
