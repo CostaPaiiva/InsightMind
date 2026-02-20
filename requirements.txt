@@ -1,5 +1,5 @@
 streamlit>=1.31
-pandas>=2.1
+pandas>=2.2.0
 numpy>=1.26
 plotly>=5.18
 scikit-learn>=1.4
@@ -8,8 +8,8 @@ missingno>=0.5.2
 phik>=0.12.4
 statsmodels>=0.14
 python-dateutil>=2.8
-setuptools>=70
-wheel
+setuptools>=75.0
+wheel>=0.41
 openai>=1.30
 kaleido>=0.2.1
 reportlab>=4.0

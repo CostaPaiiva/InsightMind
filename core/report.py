@@ -3,10 +3,15 @@ import pandas as pd
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
-from ydata_profiling import ProfileReport
 
-def build_html_report(df: pd.DataFrame, quality_metrics: dict, insights: list[str], include_profiling: bool = True) -> bytes:
-    parts = []
+
+def build_html_report(
+    df: pd.DataFrame,
+    quality_metrics: dict,
+    insights: list[str],
+    include_profiling: bool = True,
+) -> bytes:
+    parts: list[str] = []
     parts.append("<html><head><meta charset='utf-8'><title>Relatório InsightMind</title></head><body>")
     parts.append("<h1>Relatório InsightMind</h1>")
 
@@ -19,14 +24,35 @@ def build_html_report(df: pd.DataFrame, quality_metrics: dict, insights: list[st
     parts.append("</ul>")
 
     if include_profiling:
-        profile = ProfileReport(df, title="Profiling do Dataset", minimal=True)
         parts.append("<hr/>")
-        parts.append(profile.to_html())
+        try:
+            # Lazy import: evita derrubar o app no startup se o profiling estiver quebrado
+            from ydata_profiling import ProfileReport  # type: ignore
+
+            profile = ProfileReport(df, title="Profiling do Dataset", minimal=True)
+            parts.append(profile.to_html())
+        except Exception as e:
+            # Fallback: gera relatório sem profiling e inclui mensagem no HTML
+            parts.append("<h3>Profiling indisponível</h3>")
+            parts.append(
+                "<p>Não foi possível gerar o profiling automaticamente neste ambiente.</p>"
+            )
+            parts.append("<pre>" + _escape_html(repr(e)) + "</pre>")
+            parts.append(
+                "<p><b>Dica:</b> tente reinstalar dependências: "
+                "<code>python -m pip install -U --force-reinstall setuptools ydata-profiling</code></p>"
+            )
 
     parts.append("</body></html>")
     return "\n".join(parts).encode("utf-8")
 
-def build_pdf_report(df: pd.DataFrame, quality_metrics: dict, insights: list[str], figs_png: list[bytes]) -> bytes:
+
+def build_pdf_report(
+    df: pd.DataFrame,
+    quality_metrics: dict,
+    insights: list[str],
+    figs_png: list[bytes],
+) -> bytes:
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     w, h = A4
@@ -57,6 +83,7 @@ def build_pdf_report(df: pd.DataFrame, quality_metrics: dict, insights: list[str
         if y < 120:
             c.showPage()
             y = h - 60
+            c.setFont("Helvetica", 10)
 
     for png in figs_png:
         c.showPage()
@@ -65,15 +92,17 @@ def build_pdf_report(df: pd.DataFrame, quality_metrics: dict, insights: list[str
         c.drawString(40, y, "Gráfico")
         y -= 20
         img = ImageReader(BytesIO(png))
-        c.drawImage(img, 40, 120, width=520, height=520, preserveAspectRatio=True, anchor='c')
+        c.drawImage(img, 40, 120, width=520, height=520, preserveAspectRatio=True, anchor="c")
 
     c.save()
     pdf = buf.getvalue()
     buf.close()
     return pdf
 
+
 def _escape_html(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
 
 def _draw_multiline(c, text: str, x: int, y: int, max_width: int, line_height: int, bottom_margin: int) -> int:
     words = text.split()

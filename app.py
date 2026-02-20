@@ -254,7 +254,21 @@ with tabs[4]:
 
     df_for_report = st.session_state.get("df_clean", df)
 
-    include_profiling = st.checkbox("Incluir profiling (HTML) do ydata-profiling", value=True)
+    # --- Checagem segura do profiling (sem derrubar o app)
+    profiling_available = True
+    profiling_error = None
+    try:
+        import pkg_resources  # noqa: F401
+        from ydata_profiling import ProfileReport  # noqa: F401
+    except Exception as e:
+        profiling_available = False
+        profiling_error = e
+
+    include_profiling = st.checkbox(
+        "Incluir profiling (HTML) do ydata-profiling",
+        value=True,
+        disabled=not profiling_available,
+    )
 
     colA, colB = st.columns(2)
     with colA:
@@ -264,18 +278,25 @@ with tabs[4]:
                 qm_for_report = cached_quality(df_for_report)
                 insights_for_report = cached_insights(df_for_report)
 
-                html_bytes = build_html_report(
-                    df_for_report,
-                    qm_for_report,
-                    insights_for_report,
-                    include_profiling=include_profiling,
+                try:
+                    html_bytes = build_html_report(
+                        df_for_report,
+                        qm_for_report,
+                        insights_for_report,
+                        include_profiling=include_profiling,
+                    )
+                except Exception as e:
+                    st.error(f"Erro ao gerar HTML: {e}")
+                    st.exception(e)
+                    html_bytes = None
+
+            if html_bytes is not None:
+                st.download_button(
+                    "⬇️ Baixar relatório HTML",
+                    data=html_bytes,
+                    file_name="relatorio.html",
+                    mime="text/html",
                 )
-            st.download_button(
-                "⬇️ Baixar relatório HTML",
-                data=html_bytes,
-                file_name="relatorio.html",
-                mime="text/html",
-            )
 
     with colB:
         if st.button("Gerar PDF"):
